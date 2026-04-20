@@ -1,0 +1,11 @@
+# Environments
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# Testing artifacts
+.pytest_cache/
