@@ -210,7 +210,7 @@ def main():
                 f.write(f"\n## Pre-Commit Hook Alert\n")
                 f.write(f"**Status:** PASSED\n\n")
             sys.exit(0)
-            Bad Code 
+            Bad Code very very bad
     else:
         interactive_menu()
     
