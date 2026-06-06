@@ -196,23 +196,32 @@ def main():
         
         if result["status"] == "failed":
             print("\n=== AI Continuous Testing Regression Alert ===")
-            print(result["ai_report"])
+            print(result.get("ai_report", "Failure detected."))
             print("==============================================\n")
             
-            with open(output_log_path, "a") as f:
-                f.write(f"\n## Pre-Commit Hook Alert\n")
+            with open(output_log_path, "w") as f:
+                f.write(f"# Pre-Commit Hook Evaluation\n")
                 f.write(f"**Status:** FAILED\n\n")
-                f.write(f"{result['ai_report']}\n\n")
+                f.write(f"### AI Debugging Report:\n")
+                f.write(f"{result.get('ai_report', '')}\n\n")
                 
             sys.exit(1)
         else:
-            with open(output_log_path, "a") as f:
-                f.write(f"\n## Pre-Commit Hook Alert\n")
+            print("\n=== Continuous Testing Pipeline ===")
+            if result.get("ai_report"):
+                print(result["ai_report"])
+            else:
+                print("All tests passed successfully.")
+            print("===================================\n")
+            
+            with open(output_log_path, "w") as f:
+                f.write(f"# Pre-Commit Hook Evaluation\n")
                 f.write(f"**Status:** PASSED\n\n")
+                if result.get("ai_report"):
+                    f.write(f"**Note:** {result['ai_report']}\n\n")
             sys.exit(0)
     else:
         interactive_menu()
 
 if __name__ == "__main__":
     main()
-    #Empty line to test
