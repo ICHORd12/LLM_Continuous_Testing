@@ -1,0 +1,2 @@
+[console_scripts]
+continuous-test = tool.main:main

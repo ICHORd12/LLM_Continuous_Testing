@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: llm-continuous-testing
+Version: 1.0.0
+Requires-Dist: langchain-ollama
+Requires-Dist: langchain-google-genai
+Requires-Dist: langgraph
+Requires-Dist: pytest
+Requires-Dist: inquirer
+Dynamic: requires-dist

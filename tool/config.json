@@ -1,0 +1,6 @@
+{
+  "repo_path": "../fastapi",
+  "provider": "ollama",
+  "model_name": "llama3.1",
+  "gemini_api_key": ""
+}
