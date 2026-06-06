@@ -210,9 +210,9 @@ def main():
                 f.write(f"\n## Pre-Commit Hook Alert\n")
                 f.write(f"**Status:** PASSED\n\n")
             sys.exit(0)
+            I am bad code 
     else:
         interactive_menu()
 
 if __name__ == "__main__":
     main()
-    Error test
