@@ -15,7 +15,13 @@ def run_tests_node(state: GraphState):
     directory = state.get("directory", "dummy_project/")
     result = subprocess.run(["pytest", directory], capture_output=True, text=True)
     
-    if result.returncode == 0:
+    if "collected 0 items" in result.stdout or "no tests ran" in result.stdout:
+        return {
+            "status": "passed", 
+            "pytest_output": result.stdout,
+            "ai_report": "Warning: No tests were discovered. Continuous testing skipped."
+        }
+    elif result.returncode == 0:
         return {"status": "passed", "pytest_output": result.stdout}
     else:
         return {"status": "failed", "pytest_output": result.stdout}

@@ -105,8 +105,8 @@ def interactive_menu():
                 choices=[
                     "Configure Target Repository",
                     "Configure AI Model / Credentials",
-                    "Enable Tool Globally for Every Commit",
-                    "Disable Tool Globally for Every Commit",
+                    "Enable Automated Hook in Target Repo",
+                    "Disable Automated Hook in Target Repo",
                     "Run Retroactive Evaluation (Time-Travel)",
                     "Exit"
                 ],
@@ -141,7 +141,7 @@ def interactive_menu():
                 
             save_config(config)
             
-        elif action == "Enable Tool Globally for Every Commit":
+        elif action == "Enable Automated Hook in Target Repo":
             if not config["repo_path"]:
                 print("Please configure a target repository first. Press enter.")
                 input()
@@ -150,7 +150,7 @@ def interactive_menu():
                 print("Press enter to return.")
                 input()
                 
-        elif action == "Disable Tool Globally for Every Commit":
+        elif action == "Disable Automated Hook in Target Repo":
             if not config["repo_path"]:
                 print("Please configure a target repository first. Press enter.")
                 input()
@@ -210,9 +210,8 @@ def main():
                 f.write(f"\n## Pre-Commit Hook Alert\n")
                 f.write(f"**Status:** PASSED\n\n")
             sys.exit(0)
-            Bad Code very very bad
     else:
         interactive_menu()
-    
+
 if __name__ == "__main__":
     main()
