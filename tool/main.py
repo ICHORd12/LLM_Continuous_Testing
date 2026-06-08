@@ -4,6 +4,8 @@ import json
 import subprocess
 import inquirer
 from tool.graph import testing_agent
+from tool.eval_saver import save_evaluation_log
+import time
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 
@@ -19,207 +21,140 @@ def save_config(config):
 
 def run_git_command(command, repo_path):
     result = subprocess.run(command, cwd=repo_path, capture_output=True, text=True)
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip()
+    return result.stdout.strip() if result.returncode == 0 else None
 
 def setup_git_hook(repo_path):
     abs_repo_path = os.path.abspath(repo_path)
     hook_path = os.path.join(abs_repo_path, ".git", "hooks", "pre-commit")
-    
     python_path = sys.executable
     tool_main_path = os.path.abspath(__file__)
     
-    script_content = f"#!/bin/bash\n{python_path} {tool_main_path} --run-hook\n"
-    
+    # SELF-AWARE HOOK: Only triggers if the commit is happening in the exact target repository
+    script_content = f"""#!/bin/bash
+if [ "$PWD" != "{abs_repo_path}" ]; then
+    exit 0
+fi
+{python_path} {tool_main_path} --run-hook
+"""
     with open(hook_path, "w") as f:
         f.write(script_content)
-    
     os.chmod(hook_path, 0o755)
     print(f"Successfully linked automated testing agent to pre-commit hook in: {abs_repo_path}")
 
 def remove_git_hook(repo_path):
     abs_repo_path = os.path.abspath(repo_path)
     hook_path = os.path.join(abs_repo_path, ".git", "hooks", "pre-commit")
-    
     if os.path.exists(hook_path):
         os.remove(hook_path)
         print(f"Successfully removed the automated testing hook from: {abs_repo_path}")
     else:
         print(f"No active hook found in: {abs_repo_path}")
 
-def evaluate_repository(repo_path, commit_count, provider, model):
-    abs_repo_path = os.path.abspath(repo_path)
-    output_log_path = os.path.abspath("experiment_results.md")
+def run_test_on_target(config, target_dir):
+    print(f"\n[*] Running analysis using {config['model_name']}...")
     
-    original_branch = run_git_command(["git", "rev-parse", "--abbrev-ref", "HEAD"], abs_repo_path)
-    if not original_branch:
-        print("Error: Target path is not a valid git repository.")
-        return
-
-    git_log_output = run_git_command(["git", "log", "--format=%H", "-n", str(commit_count)], abs_repo_path)
-    if not git_log_output:
-        print("Error: Could not retrieve git logs.")
-        return
+    if config["provider"] == "gemini":
+        os.environ["GOOGLE_API_KEY"] = config["gemini_api_key"]
     
-    commits = git_log_output.splitlines()
-    print(f"\nEvaluating {len(commits)} commits on {abs_repo_path} using {provider.upper()}...")
+    start_time = time.time()
+    result = testing_agent.invoke({
+        "directory": target_dir,
+        "provider": config["provider"],
+        "model_name": config["model_name"]
+    })
+    elapsed = f"{time.time() - start_time:.2f}s"
     
-    with open(output_log_path, "w") as f:
-        f.write(f"# Evaluation Log\nTarget: {abs_repo_path}\nEngine: {provider}\n\n")
-
-    try:
-        for idx, commit_hash in enumerate(commits, 1):
-            print(f"[{idx}/{len(commits)}] Checking out {commit_hash[:7]}...")
-            run_git_command(["git", "checkout", commit_hash], abs_repo_path)
-            
-            test_target_dir = os.path.join(abs_repo_path, "tests")
-            initial_state = {"directory": test_target_dir, "provider": provider, "model_name": model}
-            graph_result = testing_agent.invoke(initial_state)
-            
-            with open(output_log_path, "a") as f:
-                f.write(f"## Commit: {commit_hash}\n")
-                if graph_result["status"] == "passed":
-                    f.write("**Status:** PASSED\n\n")
-                else:
-                    f.write("**Status:** FAILED\n\n")
-                    f.write(f"{graph_result['ai_report']}\n\n")
-    finally:
-        run_git_command(["git", "checkout", original_branch], abs_repo_path)
-        print(f"Finished. Results saved to {output_log_path}")
+    print("\n" + "="*40)
+    print(f"REPORT ({config['model_name']})")
+    print("="*40)
+    print(result.get("ai_report", "No analysis generated."))
+    print("="*40 + "\n")
+    
+    # CREATE REPORT IN THE TARGET REPO
+    if result["status"] == "failed":
+        target_repo = os.path.abspath(config["repo_path"])
+        report_file_path = os.path.join(target_repo, "AI_Regression_Report.md")
+        with open(report_file_path, "w", encoding="utf-8") as f:
+            f.write("# AI Continuous Testing Report\n\n")
+            f.write(result.get("ai_report", "No analysis generated."))
+        print(f"[*] Analysis saved to: {report_file_path}\n")
+    
+    bug_index = int(time.time())
+    save_evaluation_log(
+        target_repo_path=config["repo_path"],
+        pytest_output=result.get("pytest_output", ""),
+        ai_report=result.get("ai_report", ""),
+        engine_name=config["model_name"],
+        bug_index=bug_index,
+        model_suffix="prod",
+        elapsed_time=elapsed
+    )
+    
+    # If this was a hook trigger, block the commit on failure
+    if len(sys.argv) > 1 and sys.argv[1] == "--run-hook" and result["status"] == "failed":
+        sys.exit(1)
+    elif len(sys.argv) > 1 and sys.argv[1] == "--run-hook":
+        sys.exit(0)
 
 def interactive_menu():
     config = load_config()
-    
     while True:
-        os.system("clear")
-        print("=== AI Continuous Testing Interface ===")
-        print(f"Active Repo: {config['repo_path'] or 'Not Configured'}")
-        print(f"Active Model: {config['provider'].upper()} ({config['model_name']})")
-        print("=======================================")
+        print(f"\n=== AI Testing Tool (Production) ===")
+        print(f"Repo: {config['repo_path']}")
+        print(f"Model: {config['model_name']}")
         
-        main_questions = [
-            inquirer.List(
-                "action",
-                message="Select an action using arrow keys",
-                choices=[
-                    "Configure Target Repository",
-                    "Configure AI Model / Credentials",
-                    "Enable Automated Hook in Target Repo",
-                    "Disable Automated Hook in Target Repo",
-                    "Run Retroactive Evaluation (Time-Travel)",
-                    "Exit"
-                ],
-            )
+        choices = [
+            "Configure Settings",
+            "Enable Automated Hook in Target Repo",
+            "Disable Automated Hook in Target Repo",
+            "Run Test on Current Directory",
+            "Run Test on Specific Commit Hash",
+            "Exit"
         ]
+        action = inquirer.prompt([inquirer.List("act", message="Action", choices=choices)])["act"]
         
-        action = inquirer.prompt(main_questions)["action"]
-        
-        if action == "Configure Target Repository":
-            repo_q = [inquirer.Text("path", message="Enter the absolute or relative path to your project repo")]
-            path = inquirer.prompt(repo_q)["path"]
-            if os.path.exists(path):
-                config["repo_path"] = path
-                save_config(config)
-            else:
-                print("Invalid path. Press enter to return.")
-                input()
-                
-        elif action == "Configure AI Model / Credentials":
+        if action == "Configure Settings":
+            repo_q = [inquirer.Text("path", message="Enter target repo path", default=config["repo_path"])]
+            config["repo_path"] = inquirer.prompt(repo_q)["path"]
+            
             provider_q = [inquirer.List("provider", message="Select AI Provider", choices=["ollama", "gemini"])]
             prov = inquirer.prompt(provider_q)["provider"]
             config["provider"] = prov
             
             if prov == "gemini":
-                model_q = [inquirer.Text("model", message="Enter Gemini model name", default="gemini-1.5-pro")]
+                model_choices = ["gemini-3.5-flash", "gemini-3.1-pro-preview", "Custom Input"]
+                model_q = [inquirer.List("model", message="Select Gemini Model", choices=model_choices)]
+                selected_model = inquirer.prompt(model_q)["model"]
+                if selected_model == "Custom Input":
+                    custom_q = [inquirer.Text("model", message="Type specific Gemini model")]
+                    config["model_name"] = inquirer.prompt(custom_q)["model"]
+                else:
+                    config["model_name"] = selected_model
                 key_q = [inquirer.Text("key", message="Enter Google API Key", default=config["gemini_api_key"])]
-                config["model_name"] = inquirer.prompt(model_q)["model"]
                 config["gemini_api_key"] = inquirer.prompt(key_q)["key"]
             else:
                 model_q = [inquirer.Text("model", message="Enter Ollama model name", default="llama3.1")]
                 config["model_name"] = inquirer.prompt(model_q)["model"]
-                
             save_config(config)
             
         elif action == "Enable Automated Hook in Target Repo":
-            if not config["repo_path"]:
-                print("Please configure a target repository first. Press enter.")
-                input()
-            else:
-                setup_git_hook(config["repo_path"])
-                print("Press enter to return.")
-                input()
-                
+            if config["repo_path"]: setup_git_hook(config["repo_path"])
         elif action == "Disable Automated Hook in Target Repo":
-            if not config["repo_path"]:
-                print("Please configure a target repository first. Press enter.")
-                input()
-            else:
-                remove_git_hook(config["repo_path"])
-                print("Press enter to return.")
-                input()
-                
-        elif action == "Run Retroactive Evaluation (Time-Travel)":
-            if not config["repo_path"]:
-                print("Please configure a target repository first. Press enter.")
-                input()
-            else:
-                hist_q = [inquirer.Text("count", message="How many historical commits should we evaluate?", default="3")]
-                count = int(inquirer.prompt(hist_q)["count"])
-                
-                if config["provider"] == "gemini":
-                    os.environ["GOOGLE_API_KEY"] = config["gemini_api_key"]
-                    
-                evaluate_repository(config["repo_path"], count, config["provider"], config["model_name"])
-                print("Press enter to return.")
-                input()
-                
-        elif action == "Exit":
-            sys.exit(0)
+            if config["repo_path"]: remove_git_hook(config["repo_path"])
+        elif action == "Run Test on Current Directory":
+            run_test_on_target(config, os.path.abspath(os.path.join(config["repo_path"], "tests")))
+        elif action == "Run Test on Specific Commit Hash":
+            hash_val = inquirer.prompt([inquirer.Text("h", message="Hash?")])["h"]
+            run_git_command(["git", "checkout", hash_val], config["repo_path"])
+            run_test_on_target(config, os.path.abspath(os.path.join(config["repo_path"], "tests")))
+        else:
+            break
 
 def main():
-    config = load_config()
     if len(sys.argv) > 1 and sys.argv[1] == "--run-hook":
-        if not config["repo_path"]:
-            sys.exit(0)
-        if config["provider"] == "gemini":
-            os.environ["GOOGLE_API_KEY"] = config["gemini_api_key"]
-            
-        test_dir = os.path.join(os.path.abspath(config["repo_path"]), "tests")
-        result = testing_agent.invoke({
-            "directory": test_dir,
-            "provider": config["provider"],
-            "model_name": config["model_name"]
-        })
-        
-        output_log_path = os.path.abspath("experiment_results.md")
-        
-        if result["status"] == "failed":
-            print("\n=== AI Continuous Testing Regression Alert ===")
-            print(result.get("ai_report", "Failure detected."))
-            print("==============================================\n")
-            
-            with open(output_log_path, "w") as f:
-                f.write(f"# Pre-Commit Hook Evaluation\n")
-                f.write(f"**Status:** FAILED\n\n")
-                f.write(f"### AI Debugging Report:\n")
-                f.write(f"{result.get('ai_report', '')}\n\n")
-                
-            sys.exit(1)
-        else:
-            print("\n=== Continuous Testing Pipeline ===")
-            if result.get("ai_report"):
-                print(result["ai_report"])
-            else:
-                print("All tests passed successfully.")
-            print("===================================\n")
-            
-            with open(output_log_path, "w") as f:
-                f.write(f"# Pre-Commit Hook Evaluation\n")
-                f.write(f"**Status:** PASSED\n\n")
-                if result.get("ai_report"):
-                    f.write(f"**Note:** {result['ai_report']}\n\n")
-            sys.exit(0)
+        config = load_config()
+        if not config["repo_path"]: sys.exit(0)
+        run_test_on_target(config, os.path.join(config["repo_path"], "tests"))
     else:
         interactive_menu()
 
